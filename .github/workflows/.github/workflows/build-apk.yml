@@ -11,7 +11,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Получить файлы
+      - name: Checkout
         uses: actions/checkout@v4
 
       - name: Установить Java 17
@@ -20,67 +20,91 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Установить Gradle
+      - name: Установить Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Установить SDK packages
+        run: |
+          yes | sdkmanager --licenses || true
+          sdkmanager "platform-tools" "platforms;android-35" "build-tools;35.0.0"
+
+      - name: Распаковать проект
+        run: |
+          unzip -q TradeSafeAI_GitHubActions.zip
+          cd TradeSafeAI
+          echo "Проект распакован"
+
+      - name: Исправить JVM target Java/Kotlin
+        shell: bash
+        run: |
+          set -e
+          cd TradeSafeAI
+
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          files = list(Path(".").rglob("build.gradle")) + list(Path(".").rglob("build.gradle.kts"))
+
+          for p in files:
+              text = p.read_text(encoding="utf-8")
+              original = text
+
+              text = re.sub(
+                  r'sourceCompatibility\s*=\s*(?:JavaVersion\.)?VERSION_1_8',
+                  'sourceCompatibility = JavaVersion.VERSION_17',
+                  text
+              )
+
+              text = re.sub(
+                  r'targetCompatibility\s*=\s*(?:JavaVersion\.)?VERSION_1_8',
+                  'targetCompatibility = JavaVersion.VERSION_17',
+                  text
+              )
+
+              text = re.sub(
+                  r'sourceCompatibility\s+JavaVersion\.VERSION_1_8',
+                  'sourceCompatibility JavaVersion.VERSION_17',
+                  text
+              )
+
+              text = re.sub(
+                  r'targetCompatibility\s+JavaVersion\.VERSION_1_8',
+                  'targetCompatibility JavaVersion.VERSION_17',
+                  text
+              )
+
+              text = re.sub(
+                  r'jvmTarget\s*=\s*[\'"]1\.8[\'"]',
+                  "jvmTarget = '17'",
+                  text
+              )
+
+              text = re.sub(
+                  r'jvmTarget\s*=\s*[\'"]8[\'"]',
+                  "jvmTarget = '17'",
+                  text
+              )
+
+              if text != original:
+                  p.write_text(text, encoding="utf-8")
+                  print(f"Исправлен: {p}")
+          PY
+
+      - name: Установить Gradle 8.9
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.9'
 
-      - name: Распаковать проект
+      - name: Проверить Java
         run: |
-          unzip -q -o TradeSafeAI_GitHubActions.zip
-          cd TradeSafeAI
-          echo "Проект распакован"
           java -version
-
-      - name: Принудительно установить Java 17
-        run: |
-          cd TradeSafeAI
-
-          echo "Настраиваем JavaCompile на JVM 17..."
-
-          find . -name "build.gradle" -type f -print0 | while IFS= read -r -d '' file; do
-            cat >> "$file" <<'EOF'
-
-/* GitHub Actions - force Java 17 */
-tasks.withType(JavaCompile).configureEach {
-    sourceCompatibility = "17"
-    targetCompatibility = "17"
-    options.release = 17
-}
-EOF
-          done
-
-          find . -name "build.gradle.kts" -type f -print0 | while IFS= read -r -d '' file; do
-            cat >> "$file" <<'EOF'
-
-/* GitHub Actions - force Java 17 */
-tasks.withType<JavaCompile>().configureEach {
-    sourceCompatibility = "17"
-    targetCompatibility = "17"
-    options.release.set(17)
-}
-EOF
-          done
-
-          echo "Java 17 принудительно установлена."
-
-      - name: Установить Android SDK
-        run: |
-          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses || true
-          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" \
-            "platform-tools" \
-            "platforms;android-35" \
-            "build-tools;35.0.0"
-
-      - name: Проверить Java и Kotlin
-        run: |
-          cd TradeSafeAI
-          gradle --no-daemon tasks
+          javac -version
 
       - name: Собрать APK
         run: |
           cd TradeSafeAI
-          gradle --no-daemon assembleDebug
+          gradle --no-daemon clean assembleDebug
 
       - name: Загрузить APK
         uses: actions/upload-artifact@v4
