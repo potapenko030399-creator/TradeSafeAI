@@ -36,7 +36,6 @@ jobs:
         shell: bash
         run: |
           export PATH="$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/cmdline-tools/bin:$ANDROID_HOME/platform-tools:$PATH"
-
           yes | sdkmanager --licenses || true
 
       - name: Установить Android SDK packages
@@ -55,122 +54,49 @@ jobs:
           cd TradeSafeAI
           echo "Проект распакован"
 
-      - name: Исправить Java 8 -> Java 17
-        shell: bash
-        run: |
-          set -e
-
-          cd TradeSafeAI
-
-          echo "=== Gradle files ==="
-          find . -type f \( -name "build.gradle" -o -name "build.gradle.kts" \)
-
-          echo "=== Исправляем Java 8 ==="
-
-          python3 - <<'PY'
-          from pathlib import Path
-          import re
-
-          files = list(Path(".").rglob("build.gradle"))
-          files += list(Path(".").rglob("build.gradle.kts"))
-
-          for p in files:
-              text = p.read_text(encoding="utf-8")
-              original = text
-
-              # JavaVersion.VERSION_1_8 -> VERSION_17
-              text = text.replace(
-                  "JavaVersion.VERSION_1_8",
-                  "JavaVersion.VERSION_17"
-              )
-
-              text = text.replace(
-                  "JavaVersion.VERSION_8",
-                  "JavaVersion.VERSION_17"
-              )
-
-              # sourceCompatibility 1.8
-              text = re.sub(
-                  r'(sourceCompatibility\s+)([\'"]?1\.8[\'"]?)',
-                  r'\1JavaVersion.VERSION_17',
-                  text
-              )
-
-              # targetCompatibility 1.8
-              text = re.sub(
-                  r'(targetCompatibility\s+)([\'"]?1\.8[\'"]?)',
-                  r'\1JavaVersion.VERSION_17',
-                  text
-              )
-
-              # sourceCompatibility = '1.8'
-              text = re.sub(
-                  r'(sourceCompatibility\s*=\s*)[\'"]1\.8[\'"]',
-                  r'\1JavaVersion.VERSION_17',
-                  text
-              )
-
-              # targetCompatibility = '1.8'
-              text = re.sub(
-                  r'(targetCompatibility\s*=\s*)[\'"]1\.8[\'"]',
-                  r'\1JavaVersion.VERSION_17',
-                  text
-              )
-
-              # Kotlin jvmTarget 1.8
-              text = re.sub(
-                  r'(jvmTarget\s*=\s*)[\'"]1\.8[\'"]',
-                  r"\1'17'",
-                  text
-              )
-
-              text = re.sub(
-                  r'(jvmTarget\s*=\s*)[\'"]8[\'"]',
-                  r"\1'17'",
-                  text
-              )
-
-              if text != original:
-                  p.write_text(text, encoding="utf-8")
-                  print("ИСПРАВЛЕН:", p)
-
-          PY
-
-          echo "=== Проверяем, остался ли Java 8 ==="
-
-          grep -RniE \
-            "VERSION_1_8|VERSION_8|sourceCompatibility.*1\.8|targetCompatibility.*1\.8|jvmTarget.*1\.8" \
-            . \
-            --include="build.gradle" \
-            --include="build.gradle.kts" \
-            || true
-
-      - name: Принудительно настроить JVM 17
+      - name: Создать принудительную настройку Java 17
         shell: bash
         run: |
           cd TradeSafeAI
 
           cat > force-java17.gradle <<'EOF'
-          allprojects {
-              tasks.withType(JavaCompile).configureEach {
-                  sourceCompatibility = "17"
-                  targetCompatibility = "17"
-              }
+          import org.gradle.api.tasks.compile.JavaCompile
 
-              tasks.configureEach {
-                  if (name.toLowerCase().contains("kotlin")) {
-                      try {
-                          if (hasProperty("kotlinOptions")) {
-                              kotlinOptions.jvmTarget = "17"
+          gradle.projectsEvaluated {
+
+              allprojects { project ->
+
+                  // Принудительно Java 17 для всех JavaCompile
+                  project.tasks.withType(JavaCompile).configureEach {
+                      sourceCompatibility = "17"
+                      targetCompatibility = "17"
+                  }
+
+                  // Android Gradle Plugin
+                  def androidExtension = project.extensions.findByName("android")
+
+                  if (androidExtension != null) {
+                      androidExtension.compileOptions {
+                          sourceCompatibility = JavaVersion.VERSION_17
+                          targetCompatibility = JavaVersion.VERSION_17
+                      }
+                  }
+
+                  // Kotlin
+                  project.tasks.configureEach { task ->
+
+                      if (task.class.name.contains("KotlinCompile")) {
+                          try {
+                              task.kotlinOptions.jvmTarget = "17"
+                          } catch (Exception ignored) {
                           }
-                      } catch (Exception ignored) {
                       }
                   }
               }
           }
           EOF
 
-          echo "Создан force-java17.gradle"
+          echo "force-java17.gradle создан"
 
       - name: Установить Gradle 8.9
         uses: gradle/actions/setup-gradle@v4
