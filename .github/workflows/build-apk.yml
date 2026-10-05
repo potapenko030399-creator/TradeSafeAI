@@ -11,7 +11,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Получить файлы
+      - name: Checkout
         uses: actions/checkout@v4
 
       - name: Установить Java 17
@@ -20,10 +20,13 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Установить Gradle
-        uses: gradle/actions/setup-gradle@v4
-        with:
-          gradle-version: '8.9'
+      - name: Установить Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Установить SDK packages
+        run: |
+          yes | sdkmanager --licenses || true
+          sdkmanager "platform-tools" "platforms;android-35" "build-tools;35.0.0"
 
       - name: Распаковать проект
         run: |
@@ -31,18 +34,77 @@ jobs:
           cd TradeSafeAI
           echo "Проект распакован"
 
-      - name: Установить Android SDK
+      - name: Исправить JVM target Java/Kotlin
+        shell: bash
         run: |
-          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses || true
-          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" \
-            "platform-tools" \
-            "platforms;android-35" \
-            "build-tools;35.0.0"
+          set -e
+          cd TradeSafeAI
+
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          files = list(Path(".").rglob("build.gradle")) + list(Path(".").rglob("build.gradle.kts"))
+
+          for p in files:
+              text = p.read_text(encoding="utf-8")
+              original = text
+
+              text = re.sub(
+                  r'sourceCompatibility\s*=\s*(?:JavaVersion\.)?VERSION_1_8',
+                  'sourceCompatibility = JavaVersion.VERSION_17',
+                  text
+              )
+
+              text = re.sub(
+                  r'targetCompatibility\s*=\s*(?:JavaVersion\.)?VERSION_1_8',
+                  'targetCompatibility = JavaVersion.VERSION_17',
+                  text
+              )
+
+              text = re.sub(
+                  r'sourceCompatibility\s+JavaVersion\.VERSION_1_8',
+                  'sourceCompatibility JavaVersion.VERSION_17',
+                  text
+              )
+
+              text = re.sub(
+                  r'targetCompatibility\s+JavaVersion\.VERSION_1_8',
+                  'targetCompatibility JavaVersion.VERSION_17',
+                  text
+              )
+
+              text = re.sub(
+                  r'jvmTarget\s*=\s*[\'"]1\.8[\'"]',
+                  "jvmTarget = '17'",
+                  text
+              )
+
+              text = re.sub(
+                  r'jvmTarget\s*=\s*[\'"]8[\'"]',
+                  "jvmTarget = '17'",
+                  text
+              )
+
+              if text != original:
+                  p.write_text(text, encoding="utf-8")
+                  print(f"Исправлен: {p}")
+          PY
+
+      - name: Установить Gradle 8.9
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+
+      - name: Проверить Java
+        run: |
+          java -version
+          javac -version
 
       - name: Собрать APK
         run: |
           cd TradeSafeAI
-          gradle --no-daemon assembleDebug
+          gradle --no-daemon clean assembleDebug
 
       - name: Загрузить APK
         uses: actions/upload-artifact@v4
