@@ -27,9 +27,60 @@ jobs:
 
       - name: Распаковать проект
         run: |
-          unzip -q TradeSafeAI_GitHubActions.zip
+          unzip -q -o TradeSafeAI_GitHubActions.zip
           cd TradeSafeAI
           echo "Проект распакован"
+          echo "Java:"
+          java -version
+
+      - name: Исправить Java/Kotlin на JVM 17
+        run: |
+          cd TradeSafeAI
+
+          echo "Ищем Gradle-файлы..."
+          find . -name "build.gradle" -o -name "build.gradle.kts"
+
+          # Для Groovy build.gradle
+          find . -name "build.gradle" -type f -print0 | while IFS= read -r -d '' file; do
+            cat >> "$file" <<'EOF'
+
+/* GitHub Actions: force Java/Kotlin JVM 17 */
+android {
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+}
+
+tasks.withType(org.jetbrains.kotlin.gradle.tasks.KotlinCompile).configureEach {
+    kotlinOptions {
+        jvmTarget = "17"
+    }
+}
+EOF
+          done
+
+          # Для Kotlin DSL build.gradle.kts
+          find . -name "build.gradle.kts" -type f -print0 | while IFS= read -r -d '' file; do
+            cat >> "$file" <<'EOF'
+
+/* GitHub Actions: force Java/Kotlin JVM 17 */
+android {
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
+    }
+}
+
+tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile>().configureEach {
+    kotlinOptions {
+        jvmTarget = "17"
+    }
+}
+EOF
+          done
+
+          echo "Настройки Java/Kotlin 17 добавлены."
 
       - name: Установить Android SDK
         run: |
@@ -42,6 +93,7 @@ jobs:
       - name: Собрать APK
         run: |
           cd TradeSafeAI
+          chmod +x gradlew || true
           gradle --no-daemon assembleDebug
 
       - name: Загрузить APK
